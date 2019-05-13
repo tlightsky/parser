@@ -39,6 +39,7 @@ var (
 	_ Node = &GroupByClause{}
 	_ Node = &HavingClause{}
 	_ Node = &Join{}
+	_ Node = &WithClause{}
 	_ Node = &Limit{}
 	_ Node = &OnCondition{}
 	_ Node = &OrderByClause{}
@@ -738,6 +739,8 @@ type SelectStmt struct {
 	dmlNode
 	resultSetNode
 
+	// WithClause hold the ctes used by select
+	*WithClause
 	// SelectStmtOpts wraps around select hints and switches.
 	*SelectStmtOpts
 	// Distinct represents whether the select has distinct option.
@@ -1718,6 +1721,46 @@ func (n *UpdateStmt) Accept(v Visitor) (Node, bool) {
 		n.Limit = node.(*Limit)
 	}
 	return v.Leave(n)
+}
+
+type CommonTableExpr struct {
+	node
+
+	Name   model.CIStr
+	Select *SubqueryExpr
+}
+
+func (cte *CommonTableExpr) Restore(ctx *RestoreCtx) error {
+	ctx.WriteName(cte.Name.O)
+	ctx.WriteKeyWord(" AS ")
+	cte.Select.Restore(ctx)
+	return nil
+}
+
+// WithClause is the with clause.
+type WithClause struct {
+	node
+
+	WithList []*CommonTableExpr
+}
+
+// Restore implements Node interface.
+func (w *WithClause) Restore(ctx *RestoreCtx) error {
+	ctx.WriteKeyWord("WITH ")
+	for i, cte := range w.WithList {
+		if i > 0 {
+			ctx.WritePlain(",")
+		}
+		if err := cte.Restore(ctx); err != nil {
+			return errors.Annotate(err, "An error occurred while restore With CTE")
+		}
+	}
+	return nil
+}
+
+// Accept implements Node Accept interface.
+func (w *WithClause) Accept(v Visitor) (Node, bool) {
+	return v.Leave(w)
 }
 
 // Limit is the limit clause.

@@ -763,7 +763,10 @@ import (
 	KillOrKillTiDB			"Kill or Kill TiDB"
 	LikeEscapeOpt 			"like escape option"
 	LikeTableWithOrWithoutParen	"LIKE table_name or ( LIKE table_name )"
+	WithClause          "WITH clause"
+	WithList            "List of CTE"
 	LimitClause			"LIMIT clause"
+	CommonTableExpr     "CommonTableExpression here"
 	LimitOption			"Limit option could be integer or parameter marker."
 	Lines				"Lines clause"
 	LinesTerminated			"Lines terminated by"
@@ -3131,6 +3134,47 @@ HavingClause:
 		$$ = &ast.HavingClause{Expr: $2}
 	}
 
+/***************WITH Syntax (Common Table Expressions)**************
+ * See https://dev.mysql.com/doc/refman/8.0/en/with.html
+ *
+ * TODO: Support columns
+ *******************************************************************/
+WithClause:
+	"WITH" WithList
+	{
+		$$ = $2.(*ast.WithClause)
+	}
+
+WithList:
+	WithList ',' CommonTableExpr
+	{
+		with := $1.(*ast.WithClause)
+		cte := $3.(*ast.CommonTableExpr)
+		with.WithList = append(with.WithList, cte)
+		$$ = with
+	}
+|	CommonTableExpr
+	{
+		withList := []*ast.CommonTableExpr{$1.(*ast.CommonTableExpr)}
+		$$ = &ast.WithClause{
+			WithList: withList,
+		}
+	}
+
+CommonTableExpr:
+/* TODO: use pure ident list */
+	Identifier ColumnNameListOpt "AS" SubSelect
+	{
+		cte := &ast.CommonTableExpr{
+			Name: model.NewCIStr($1),
+			Select: $4.(*ast.SubqueryExpr),
+		}
+		// if $2 != nil {
+		// 	cte.ColumnNames: $2.([]*ast.ColumnName)
+		// }
+		$$ = cte
+	}
+
 IfExists:
 	{
 		$$ = false
@@ -4843,6 +4887,19 @@ SelectStmt:
 		}
 		if $3 != nil {
 			st.Limit = $3.(*ast.Limit)
+		}
+		$$ = st
+	}
+|	WithClause SelectStmtFromTable OrderByOptional SelectStmtLimit SelectLockOpt
+	{
+		st := $2.(*ast.SelectStmt)
+		st.WithClause = $1.(*ast.WithClause)
+		st.LockTp = $5.(ast.SelectLockType)
+		if $3 != nil {
+			st.OrderBy = $3.(*ast.OrderByClause)
+		}
+		if $4 != nil {
+			st.Limit = $4.(*ast.Limit)
 		}
 		$$ = st
 	}
